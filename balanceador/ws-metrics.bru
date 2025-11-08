@@ -1,0 +1,19 @@
+meta {
+  name: ws-metrics
+  type: ws
+  seq: 4
+}
+
+ws {
+  url: ws://localhost:9000/metrics/ws
+  body: ws
+  auth: none
+}
+
+body:ws {
+  name: message 1
+  type: json
+  content: '''
+    {}
+  '''
+}

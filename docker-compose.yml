@@ -1,0 +1,6 @@
+services:
+  go-service:
+    image: go-service
+    build: .
+    ports:
+    - "8080-8082:8080"
