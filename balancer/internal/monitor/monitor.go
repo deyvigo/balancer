@@ -165,9 +165,10 @@ func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
 	defer m.mu.RUnlock()
 
 	res := make([]internal.Metrics, 0, len(m.backends))
-	for _, b := range m.backends {
+	for i, b := range m.backends {
 		alive, ema, er, last, u := b.snapshot()
 		res = append(res, internal.Metrics{
+			Id:          i,
 			URL:         u,
 			Alive:       alive,
 			EMAMs:       ema,

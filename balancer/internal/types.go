@@ -6,6 +6,7 @@ import (
 )
 
 type Metrics struct {
+	Id          int     `json:"id"`
 	URL         string  `json:"url"`
 	Alive       bool    `json:"alive"`
 	EMAMs       float64 `json:"ema_ms"`
