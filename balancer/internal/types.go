@@ -34,3 +34,14 @@ type Action struct {
 	Type string            `json:"type"` // "drain","restart","notify","noop"
 	Meta map[string]string `json:"meta"`
 }
+
+type AnalysisResult struct {
+	BackendId int
+	Status    string // "HEALTHY","DEGRADED","DOWN"
+	Reason    string
+}
+
+type PlanResult struct {
+	BackendId int
+	Action    string
+}

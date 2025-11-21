@@ -7,7 +7,7 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #ffffff;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -29,4 +29,49 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+@layer utilities {
+  .border-animated {
+    position: relative;
+    overflow: hidden;
+    z-index: 0; /* Aseguramos contexto de apilamiento */
+  }
+
+  .border-animated::before {
+    content: "";
+    position: absolute;
+    inset: -4px; /* Un poco más ancho para que se note bien el borde */
+    
+    /* AQUÍ ESTÁ EL CAMBIO CLAVE: */
+    background: conic-gradient(
+      from 0deg, 
+      transparent 0deg, 
+      transparent 270deg, 
+      var(--border-color) 360deg
+    );
+    
+    animation: spin-border 4s linear infinite; /* 4s es más suave, ajusta a tu gusto */
+    z-index: -1; /* Detrás del contenido */
+    border-radius: inherit; /* Hereda el borde redondeado del padre */
+  }
+
+  /* El fondo blanco para tapar el centro */
+  .border-animated::after {
+    content: "";
+    position: absolute;
+    inset: 4px; /* Esto define el grosor del borde visible */
+    background: white; 
+    border-radius: inherit;
+    z-index: -1;
+  }
+
+  @keyframes spin-border {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
 }

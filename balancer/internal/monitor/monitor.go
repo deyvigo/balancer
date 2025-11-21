@@ -57,11 +57,12 @@ func (b *SafeBackend) snapshot() (alive bool, ema float64, errRate float64, last
 }
 
 type MonitorService struct {
-	backends []*SafeBackend
-	client   *http.Client
-	alpha    float64
-	period   time.Duration
-	mu       sync.RWMutex
+	backends       []*SafeBackend
+	client         *http.Client
+	alpha          float64
+	period         time.Duration
+	mu             sync.RWMutex
+	updatesChannel chan []internal.Metrics
 }
 
 func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration) *MonitorService {
@@ -89,8 +90,24 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		alpha:  alpha,
-		period: period,
+		alpha:          alpha,
+		period:         period,
+		updatesChannel: make(chan []internal.Metrics, 10),
+	}
+}
+
+func (m *MonitorService) GetUpdatesChannel() <-chan []internal.Metrics {
+	return m.updatesChannel
+}
+
+func (m *MonitorService) checkAndNotify() {
+	m.checkAll()
+
+	metrics := m.SnapshotMetrics()
+	select {
+	case m.updatesChannel <- metrics:
+	default:
+		log.Printf("[monitor] Warning: Updates channel full, dropping metric snapshot")
 	}
 }
 
@@ -99,13 +116,13 @@ func (m *MonitorService) StartPolling(ctx context.Context) {
 	go func() {
 		defer t.Stop()
 
-		m.checkAll()
+		m.checkAndNotify()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				m.checkAll()
+				m.checkAndNotify()
 			}
 		}
 	}()
