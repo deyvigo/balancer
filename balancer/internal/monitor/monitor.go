@@ -116,8 +116,6 @@ func (m *MonitorService) checkBackend(b *SafeBackend) {
 
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/health"
-	} else {
-
 	}
 
 	start := time.Now()
@@ -177,4 +175,33 @@ func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
 		})
 	}
 	return res
+}
+
+// GetAliveBackends devuelve una lista de URLs de backends que están vivos
+func (m *MonitorService) GetAliveBackends() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var alive []string
+	for _, b := range m.backends {
+		isAlive, _, _, _, url := b.snapshot()
+		if isAlive {
+			alive = append(alive, url)
+		}
+	}
+	return alive
+}
+
+// GetBackendMetrics devuelve las métricas de un backend específico por URL
+func (m *MonitorService) GetBackendMetrics(targetURL string) (alive bool, emaMs float64, errorRate float64, found bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, b := range m.backends {
+		isAlive, ema, er, _, url := b.snapshot()
+		if url == targetURL {
+			return isAlive, ema, er, true
+		}
+	}
+	return false, 0, 0, false
 }

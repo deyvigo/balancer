@@ -1,6 +1,24 @@
 services:
-  go-service:
+  go-service-1:
     image: go-service
     build: .
     ports:
-    - "8080-8082:8080"
+      - "8080:8080"
+    environment:
+      - PORT=8080
+  
+  go-service-2:
+    image: go-service
+    build: .
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+  
+  go-service-3:
+    image: go-service
+    build: .
+    ports:
+      - "8082:8080"
+    environment:
+      - PORT=8080
