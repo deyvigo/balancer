@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"github.com/deyvigo/balanceador/balancer/internal/analyze"
 	"github.com/deyvigo/balanceador/balancer/internal/config"
 	"github.com/deyvigo/balanceador/balancer/internal/execute"
+	"github.com/deyvigo/balanceador/balancer/internal/loadbalancer"
 	"github.com/deyvigo/balanceador/balancer/internal/monitor"
 	"github.com/deyvigo/balanceador/balancer/internal/plan"
 	"github.com/deyvigo/balanceador/balancer/internal/web"
@@ -46,6 +50,9 @@ func main() {
 	plan := plan.NewPlan(analyzer.GetUpdatesChannel(), planLogger)
 	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger)
 
+	// Crear balanceador Weighted Round Robin
+	wrr := loadbalancer.NewWeightedRoundRobin()
+
 	// Crear servidor WebSocket
 	wsServer := &web.WebSocketServer{
 		Monitor: mon,
@@ -60,6 +67,52 @@ func main() {
 	analyzer.Start(ctx)
 	plan.Start(ctx)
 	execute.Start(ctx)
+
+	// Actualizar pesos del load balancer periódicamente
+	go func() {
+		ticker := time.NewTicker(period)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				metrics := mon.SnapshotMetrics()
+				wrr.UpdateMetrics(metrics)
+
+				// Log de pesos calculados
+				weights := wrr.GetBackendWeights()
+				log.Printf("[LoadBalancer] Pesos actualizados: %+v", weights)
+			}
+		}
+	}()
+
+	// Handler principal: Balanceo de carga con Weighted Round Robin
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		backendURL, ok := wrr.NextBackend()
+		if !ok {
+			http.Error(w, "No hay backends disponibles", http.StatusServiceUnavailable)
+			log.Println("[LoadBalancer] ⚠️  No hay backends disponibles")
+			return
+		}
+
+		target, err := url.Parse(backendURL)
+		if err != nil {
+			http.Error(w, "Error al parsear URL del backend", http.StatusInternalServerError)
+			log.Printf("[LoadBalancer] ❌ Error parseando URL %s: %v", backendURL, err)
+			return
+		}
+
+		// Crear reverse proxy
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("[LoadBalancer] ❌ Error en proxy a %s: %v", target, err)
+			http.Error(w, fmt.Sprintf("Error conectando con backend: %v", err), http.StatusBadGateway)
+		}
+
+		log.Printf("[LoadBalancer] ➡️  %s → %s", r.URL.Path, backendURL)
+		proxy.ServeHTTP(w, r)
+	})
 
 	http.HandleFunc("/metrics/ws", wsServer.MetricsHandler)
 
