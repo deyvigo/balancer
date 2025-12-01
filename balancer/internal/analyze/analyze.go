@@ -2,7 +2,8 @@ package analyze
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 
 	"github.com/deyvigo/balanceador/balancer/internal"
 )
@@ -11,12 +12,14 @@ type Analyzer struct {
 	inputChannel <-chan []internal.Metrics
 	// Here we can add other channel to comunicate with Plan module
 	outputChannel chan []internal.AnalysisResult
+	logger        *slog.Logger
 }
 
-func NewAnalyzer(inputChannel <-chan []internal.Metrics) *Analyzer {
+func NewAnalyzer(inputChannel <-chan []internal.Metrics, logger *slog.Logger) *Analyzer {
 	return &Analyzer{
 		inputChannel:  inputChannel,
 		outputChannel: make(chan []internal.AnalysisResult, 10),
+		logger:        logger,
 	}
 }
 
@@ -26,7 +29,8 @@ func (a *Analyzer) GetUpdatesChannel() <-chan []internal.AnalysisResult {
 
 func (a *Analyzer) Start(ctx context.Context) {
 	go func() {
-		log.Println("[Analize] Analyzer started")
+		a.logger.Info("Analyzer started")
+		// log.Println("[Analize] Analyzer started")
 		for {
 			select {
 			case <-ctx.Done():
@@ -50,15 +54,18 @@ func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
 		if !m.Alive {
 			status = "DOWN"
 			reason = "Connection refused / timeout"
-			log.Printf("[Analize] Backend %d is down", m.Id)
+			a.logger.Info(fmt.Sprintf("Backend %d is down", m.Id))
+			// log.Printf("[Analize] Backend %d is down", m.Id)
 		} else if m.ErrorRate > 0.5 {
 			status = "DEGRADED"
 			reason = "Error rate is high (>50%)"
-			log.Printf("[Analize] Backend %d is degraded", m.Id)
+			a.logger.Info(fmt.Sprintf("Backend %d is degraded", m.Id))
+			// log.Printf("[Analize] Backend %d is degraded", m.Id)
 		} else {
 			status = "HEALTHY"
 			reason = "Everything is ok"
-			log.Printf("[Analize] Backend %d is healthy", m.Id)
+			a.logger.Info(fmt.Sprintf("Backend %d is heathy", m.Id))
+			// log.Printf("[Analize] Backend %d is healthy", m.Id)
 		}
 		results = append(results, internal.AnalysisResult{
 			BackendId: m.Id,
@@ -71,7 +78,8 @@ func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
 		select {
 		case a.outputChannel <- results:
 		default:
-			log.Printf("[Analize] Warning: Output channel full, dropping analysis result")
+			a.logger.Warn("Warning: Output channel full, dropping analysis result")
+			// log.Printf("[Analize] Warning: Output channel full, dropping analysis result")
 		}
 	}
 }

@@ -1,0 +1,9 @@
+{
+  "app_name": "balancer",
+  "logging": {
+    "monitor": false,
+    "analyze": false,
+    "plan": true,
+    "execute": true
+  }
+}

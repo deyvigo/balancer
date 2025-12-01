@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/deyvigo/balanceador/balancer/internal/analyze"
+	"github.com/deyvigo/balanceador/balancer/internal/config"
 	"github.com/deyvigo/balanceador/balancer/internal/execute"
 	"github.com/deyvigo/balanceador/balancer/internal/monitor"
 	"github.com/deyvigo/balanceador/balancer/internal/plan"
@@ -16,6 +17,17 @@ import (
 )
 
 func main() {
+	// load config
+	if err := config.LoadConfig("config.json"); err != nil {
+		panic(err)
+	}
+
+	// create loggers
+	monitorLogger := config.GetModuleLogger("monitor")
+	analyzeLogger := config.GetModuleLogger("analyze")
+	planLogger := config.GetModuleLogger("plan")
+	executeLogger := config.GetModuleLogger("execute")
+
 	backends := []string{
 		"http://localhost:8080",
 		"http://localhost:8081",
@@ -26,10 +38,10 @@ func main() {
 	period := 5 * time.Second
 	timeout := 2 * time.Second
 
-	mon := monitor.NewMonitor(backends, period, alpha, timeout)
-	analyzer := analyze.NewAnalyzer(mon.GetUpdatesChannel())
-	plan := plan.NewPlan(analyzer.GetUpdatesChannel())
-	execute := execute.NewExecute(plan.GetUpdatesChannel())
+	mon := monitor.NewMonitor(backends, period, alpha, timeout, monitorLogger)
+	analyzer := analyze.NewAnalyzer(mon.GetUpdatesChannel(), analyzeLogger)
+	plan := plan.NewPlan(analyzer.GetUpdatesChannel(), planLogger)
+	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger)
 
 	// Crear servidor WebSocket
 	wsServer := &web.WebSocketServer{

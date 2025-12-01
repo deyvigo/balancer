@@ -2,7 +2,8 @@ package monitor
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -63,9 +64,10 @@ type MonitorService struct {
 	period         time.Duration
 	mu             sync.RWMutex
 	updatesChannel chan []internal.Metrics
+	logger         *slog.Logger
 }
 
-func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration) *MonitorService {
+func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration, logger *slog.Logger) *MonitorService {
 	bs := make([]*SafeBackend, 0, len(backends))
 
 	for _, s := range backends {
@@ -74,7 +76,8 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		}
 		u, err := url.Parse(s)
 		if err != nil {
-			log.Printf("ignoring invalid backend url %q: %v", s, err)
+			logger.Info(fmt.Sprintf("ignoring invalid backend url %q: %v", s, err))
+			// log.Printf("ignoring invalid backend url %q: %v", s, err)
 			continue
 		}
 		bs = append(bs, &SafeBackend{
@@ -93,6 +96,7 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		alpha:          alpha,
 		period:         period,
 		updatesChannel: make(chan []internal.Metrics, 10),
+		logger:         logger,
 	}
 }
 
@@ -107,13 +111,15 @@ func (m *MonitorService) checkAndNotify() {
 	select {
 	case m.updatesChannel <- metrics:
 	default:
-		log.Printf("[monitor] Warning: Updates channel full, dropping metric snapshot")
+		m.logger.Warn("Warning: Updates channel full, dropping metric snapshot")
+		// log.Printf("[monitor] Warning: Updates channel full, dropping metric snapshot")
 	}
 }
 
 func (m *MonitorService) StartPolling(ctx context.Context) {
 	t := time.NewTicker(m.period)
 	go func() {
+		m.logger.Info("Monitor started")
 		defer t.Stop()
 
 		m.checkAndNotify()
@@ -144,13 +150,15 @@ func (m *MonitorService) checkBackend(b *SafeBackend) {
 	if err != nil {
 		isErr = true
 		b.setAlive(false)
-		log.Printf("[monitor] %s error: %v", b.data.URL.String(), err)
+		m.logger.Error(fmt.Sprintf("%s error: %v", b.data.URL.String(), err))
+		// log.Printf("[monitor] %s error: %v", b.data.URL.String(), err)
 	} else {
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			isErr = true
 			b.setAlive(false)
-			log.Printf("[monitor] %s returned status %d", b.data.URL.String(), resp.StatusCode)
+			m.logger.Error("%s returned status %d", b.data.URL.String(), resp.StatusCode)
+			// log.Printf("[monitor] %s returned status %d", b.data.URL.String(), resp.StatusCode)
 		} else {
 			// healthy
 			b.setAlive(true)
