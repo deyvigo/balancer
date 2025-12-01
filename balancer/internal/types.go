@@ -5,21 +5,33 @@ import (
 	"time"
 )
 
+type CircuitState string
+
+const (
+	StateClosed   CircuitState = "CLOSED"
+	StateOpen     CircuitState = "OPEN"
+	StateHalfOpen CircuitState = "HALF_OPEN"
+)
+
 type Metrics struct {
-	Id          int     `json:"id"`
-	URL         string  `json:"url"`
-	Alive       bool    `json:"alive"`
-	EMAMs       float64 `json:"ema_ms"`
-	ErrorRate   float64 `json:"error_rate"`
-	LastChecked string  `json:"last_checked"`
+	Id           int          `json:"id"`
+	URL          string       `json:"url"`
+	Alive        bool         `json:"alive"`
+	EMAMs        float64      `json:"ema_ms"`
+	ErrorRate    float64      `json:"error_rate"`
+	LastChecked  string       `json:"last_checked"`
+	CircuitState CircuitState `json:"circuit_state"`
 }
 
 type Backend struct {
-	URL       *url.URL  `json:"url"`
-	Alive     bool      `json:"alive"`
-	EMAms     float64   `json:"ema_ms"`
-	ErrorRate float64   `json:"error_rate"`
-	CheckedAt time.Time `json:"checket_at"`
+	URL             *url.URL     `json:"url"`
+	Alive           bool         `json:"alive"`
+	EMAms           float64      `json:"ema_ms"`
+	ErrorRate       float64      `json:"error_rate"`
+	CheckedAt       time.Time    `json:"checket_at"`
+	Failures        int          `json:"failures"`
+	CircuitState    CircuitState `json:"circuit_state"`
+	LastStateChange time.Time    `json:"last_state_change"`
 }
 
 type Decision struct {
@@ -36,9 +48,10 @@ type Action struct {
 }
 
 type AnalysisResult struct {
-	BackendId int
-	Status    string // "HEALTHY","DEGRADED","DOWN"
-	Reason    string
+	BackendId    int
+	Status       string // "HEALTHY","DEGRADED","DOWN"
+	Reason       string
+	CircuitState CircuitState
 }
 
 type PlanResult struct {

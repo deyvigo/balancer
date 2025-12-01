@@ -47,23 +47,36 @@ func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
 	for _, m := range metrics {
 		var status, reason string
 
-		if !m.Alive {
+		switch m.CircuitState {
+		case internal.StateOpen:
 			status = "DOWN"
-			reason = "Connection refused / timeout"
-			log.Printf("[Analize] Backend %d is down", m.Id)
-		} else if m.ErrorRate > 0.5 {
+			reason = "Circuit is open"
+			log.Printf("[Analize] Backend %d is down (circuit open)", m.Id)
+		case internal.StateHalfOpen:
 			status = "DEGRADED"
-			reason = "Error rate is high (>50%)"
-			log.Printf("[Analize] Backend %d is degraded", m.Id)
-		} else {
-			status = "HEALTHY"
-			reason = "Everything is ok"
-			log.Printf("[Analize] Backend %d is healthy", m.Id)
+			reason = "Circuit is half-open, testing connection"
+			log.Printf("[Analize] Backend %d is degraded (circuit half-open)", m.Id)
+		case internal.StateClosed:
+			if !m.Alive {
+				status = "DOWN"
+				reason = "Connection refused / timeout"
+				log.Printf("[Analize] Backend %d is down", m.Id)
+			} else if m.ErrorRate > 0.5 {
+				status = "DEGRADED"
+				reason = "Error rate is high (>50%)"
+				log.Printf("[Analize] Backend %d is degraded", m.Id)
+			} else {
+				status = "HEALTHY"
+				reason = "Everything is ok"
+				log.Printf("[Analize] Backend %d is healthy", m.Id)
+			}
 		}
+
 		results = append(results, internal.AnalysisResult{
-			BackendId: m.Id,
-			Status:    status,
-			Reason:    reason,
+			BackendId:    m.Id,
+			Status:       status,
+			Reason:       reason,
+			CircuitState: m.CircuitState,
 		})
 
 	}

@@ -50,22 +50,46 @@ func (b *SafeBackend) setAlive(a bool) {
 	b.data.CheckedAt = time.Now()
 }
 
-func (b *SafeBackend) snapshot() (alive bool, ema float64, errRate float64, last time.Time, rawURL string) {
+func (b *SafeBackend) setCircuitState(state internal.CircuitState) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.data.CircuitState != state {
+		b.data.CircuitState = state
+		b.data.LastStateChange = time.Now()
+		log.Printf("[monitor] Backend %s circuit state changed to %s", b.data.URL, state)
+	}
+}
+
+func (b *SafeBackend) incrementFailures() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data.Failures++
+}
+
+func (b *SafeBackend) resetFailures() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data.Failures = 0
+}
+
+func (b *SafeBackend) snapshot() (alive bool, ema float64, errRate float64, last time.Time, rawURL string, state internal.CircuitState) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.data.Alive, b.data.EMAms, b.data.ErrorRate, b.data.CheckedAt, b.data.URL.String()
+	return b.data.Alive, b.data.EMAms, b.data.ErrorRate, b.data.CheckedAt, b.data.URL.String(), b.data.CircuitState
 }
 
 type MonitorService struct {
-	backends       []*SafeBackend
-	client         *http.Client
-	alpha          float64
-	period         time.Duration
-	mu             sync.RWMutex
-	updatesChannel chan []internal.Metrics
+	backends         []*SafeBackend
+	client           *http.Client
+	alpha            float64
+	period           time.Duration
+	mu               sync.RWMutex
+	updatesChannel   chan []internal.Metrics
+	failureThreshold int
+	openStateTimeout time.Duration
 }
 
-func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration) *MonitorService {
+func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration, failureThreshold int, openStateTimeout time.Duration) *MonitorService {
 	bs := make([]*SafeBackend, 0, len(backends))
 
 	for _, s := range backends {
@@ -79,8 +103,10 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		}
 		bs = append(bs, &SafeBackend{
 			data: internal.Backend{
-				URL:   u,
-				Alive: false,
+				URL:             u,
+				Alive:           false,
+				CircuitState:    internal.StateClosed,
+				LastStateChange: time.Now(),
 			},
 		})
 	}
@@ -90,9 +116,11 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		alpha:          alpha,
-		period:         period,
-		updatesChannel: make(chan []internal.Metrics, 10),
+		alpha:            alpha,
+		period:           period,
+		updatesChannel:   make(chan []internal.Metrics, 10),
+		failureThreshold: failureThreshold,
+		openStateTimeout: openStateTimeout,
 	}
 }
 
@@ -129,12 +157,18 @@ func (m *MonitorService) StartPolling(ctx context.Context) {
 }
 
 func (m *MonitorService) checkBackend(b *SafeBackend) {
+	if b.data.CircuitState == internal.StateOpen {
+		if time.Since(b.data.LastStateChange) > m.openStateTimeout {
+			b.setCircuitState(internal.StateHalfOpen)
+		} else {
+			return // Keep circuit open
+		}
+	}
+
 	u := *b.data.URL
 
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/health"
-	} else {
-
 	}
 
 	start := time.Now()
@@ -158,6 +192,20 @@ func (m *MonitorService) checkBackend(b *SafeBackend) {
 	}
 
 	b.update(latMs, isErr, m.alpha)
+
+	if isErr {
+		b.incrementFailures()
+		if b.data.CircuitState == internal.StateClosed && b.data.Failures >= m.failureThreshold {
+			b.setCircuitState(internal.StateOpen)
+		} else if b.data.CircuitState == internal.StateHalfOpen {
+			b.setCircuitState(internal.StateOpen)
+		}
+	} else {
+		if b.data.CircuitState == internal.StateHalfOpen {
+			b.setCircuitState(internal.StateClosed)
+		}
+		b.resetFailures()
+	}
 }
 
 func (m *MonitorService) checkAll() {
@@ -183,14 +231,15 @@ func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
 
 	res := make([]internal.Metrics, 0, len(m.backends))
 	for i, b := range m.backends {
-		alive, ema, er, last, u := b.snapshot()
+		alive, ema, er, last, u, state := b.snapshot()
 		res = append(res, internal.Metrics{
-			Id:          i,
-			URL:         u,
-			Alive:       alive,
-			EMAMs:       ema,
-			ErrorRate:   er,
-			LastChecked: last.Format(time.RFC3339),
+			Id:           i,
+			URL:          u,
+			Alive:        alive,
+			EMAMs:        ema,
+			ErrorRate:    er,
+			LastChecked:  last.Format(time.RFC3339),
+			CircuitState: state,
 		})
 	}
 	return res

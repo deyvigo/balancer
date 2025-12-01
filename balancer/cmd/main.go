@@ -26,7 +26,10 @@ func main() {
 	period := 5 * time.Second
 	timeout := 2 * time.Second
 
-	mon := monitor.NewMonitor(backends, period, alpha, timeout)
+	failureThreshold := 3
+	openStateTimeout := 10 * time.Second
+
+	mon := monitor.NewMonitor(backends, period, alpha, timeout, failureThreshold, openStateTimeout)
 	analyzer := analyze.NewAnalyzer(mon.GetUpdatesChannel())
 	plan := plan.NewPlan(analyzer.GetUpdatesChannel())
 	execute := execute.NewExecute(plan.GetUpdatesChannel())
