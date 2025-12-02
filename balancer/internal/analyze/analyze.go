@@ -9,20 +9,20 @@ import (
 )
 
 type Analyzer struct {
-	inputChannel  <-chan []internal.Metrics
-	outputChannel chan []internal.AnalysisResult
+	inputChannel  <-chan map[string]internal.Metrics
+	outputChannel chan map[string]internal.AnalysisResult
 	logger        *slog.Logger
 }
 
-func NewAnalyzer(inputChannel <-chan []internal.Metrics, logger *slog.Logger) *Analyzer {
+func NewAnalyzer(inputChannel <-chan map[string]internal.Metrics, logger *slog.Logger) *Analyzer {
 	return &Analyzer{
 		inputChannel:  inputChannel,
-		outputChannel: make(chan []internal.AnalysisResult, 10),
+		outputChannel: make(chan map[string]internal.AnalysisResult, 10),
 		logger:        logger,
 	}
 }
 
-func (a *Analyzer) GetUpdatesChannel() <-chan []internal.AnalysisResult {
+func (a *Analyzer) GetUpdatesChannel() <-chan map[string]internal.AnalysisResult {
 	return a.outputChannel
 }
 
@@ -38,15 +38,15 @@ func (a *Analyzer) Start(ctx context.Context) {
 				if !ok {
 					return
 				}
-				a.analyzeBatch(metrics)
+				a.analyzeSnapshot(metrics)
 			}
 		}
 	}()
 }
 
-func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
-	results := make([]internal.AnalysisResult, 0, len(metrics))
-	for _, m := range metrics {
+func (a *Analyzer) analyzeSnapshot(metrics map[string]internal.Metrics) {
+	results := make(map[string]internal.AnalysisResult, len(metrics))
+	for url, m := range metrics {
 		var status, reason string
 
 		switch m.CircuitState {
@@ -74,12 +74,12 @@ func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
 			}
 		}
 
-		results = append(results, internal.AnalysisResult{
+		results[url] = internal.AnalysisResult{
 			BackendId:    m.Id,
 			Status:       status,
 			Reason:       reason,
 			CircuitState: m.CircuitState,
-		})
+		}
 
 	}
 	if len(results) > 0 {

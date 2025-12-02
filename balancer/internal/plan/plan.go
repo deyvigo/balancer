@@ -10,22 +10,22 @@ import (
 )
 
 type Plan struct {
-	inputChannel  <-chan []internal.AnalysisResult
-	outputChannel chan []internal.PlanResult
+	inputChannel  <-chan map[string]internal.AnalysisResult
+	outputChannel chan map[string]internal.PlanResult
 	logger        *slog.Logger
-	lastStatuses  map[int]string
+	lastStatuses  map[string]string
 }
 
-func NewPlan(inputChannel <-chan []internal.AnalysisResult, logger *slog.Logger) *Plan {
+func NewPlan(inputChannel <-chan map[string]internal.AnalysisResult, logger *slog.Logger) *Plan {
 	return &Plan{
 		inputChannel:  inputChannel,
-		outputChannel: make(chan []internal.PlanResult, 10),
+		outputChannel: make(chan map[string]internal.PlanResult, 10),
 		logger:        logger,
-		lastStatuses:  make(map[int]string),
+		lastStatuses:  make(map[string]string),
 	}
 }
 
-func (p *Plan) GetUpdatesChannel() <-chan []internal.PlanResult {
+func (p *Plan) GetUpdatesChannel() <-chan map[string]internal.PlanResult {
 	return p.outputChannel
 }
 
@@ -41,23 +41,23 @@ func (p *Plan) Start(ctx context.Context) {
 				if !ok {
 					return
 				}
-				p.planBatch(analysis)
+				p.planSnapshot(analysis)
 			}
 		}
 	}()
 }
 
-func (p *Plan) planBatch(analysis []internal.AnalysisResult) {
-	batchPlan := make([]internal.PlanResult, 0, len(analysis))
-	for _, item := range analysis {
+func (p *Plan) planSnapshot(analysis map[string]internal.AnalysisResult) {
+	batchPlan := make(map[string]internal.PlanResult, len(analysis))
+	for url, item := range analysis {
 
-		lastStatus, known := p.lastStatuses[item.BackendId]
+		lastStatus, known := p.lastStatuses[url]
 
 		if known && lastStatus == item.Status {
 			// No changes
 			continue
 		}
-		p.lastStatuses[item.BackendId] = item.Status
+		p.lastStatuses[url] = item.Status
 
 		var action string
 		switch item.Status {
@@ -75,10 +75,10 @@ func (p *Plan) planBatch(analysis []internal.AnalysisResult) {
 			log.Printf("[PLAN] Estado desconocido para Backend %d", item.BackendId)
 		}
 
-		batchPlan = append(batchPlan, internal.PlanResult{
+		batchPlan[url] = internal.PlanResult{
 			BackendId: item.BackendId,
 			Action:    action,
-		})
+		}
 	}
 
 	if len(batchPlan) > 0 {

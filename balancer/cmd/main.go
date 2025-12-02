@@ -45,13 +45,14 @@ func main() {
 	failureThreshold := 3
 	openStateTimeout := 10 * time.Second
 
+	// Crear balanceador Weighted Round Robin
+	wrr := loadbalancer.NewWeightedRoundRobin()
+
+	// Crear y conectar el ciclo MAPE-K
 	mon := monitor.NewMonitor(backends, period, alpha, timeout, monitorLogger, failureThreshold, openStateTimeout)
 	analyzer := analyze.NewAnalyzer(mon.GetUpdatesChannel(), analyzeLogger)
 	plan := plan.NewPlan(analyzer.GetUpdatesChannel(), planLogger)
-	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger)
-
-	// Crear balanceador Weighted Round Robin
-	wrr := loadbalancer.NewWeightedRoundRobin()
+	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger, mon, wrr)
 
 	// Crear servidor WebSocket
 	wsServer := &web.WebSocketServer{
@@ -68,24 +69,8 @@ func main() {
 	plan.Start(ctx)
 	execute.Start(ctx)
 
-	// Actualizar pesos del load balancer periódicamente
-	go func() {
-		ticker := time.NewTicker(period)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				metrics := mon.SnapshotMetrics()
-				wrr.UpdateMetrics(metrics)
-
-				// Log de pesos calculados
-				weights := wrr.GetBackendWeights()
-				log.Printf("[LoadBalancer] Pesos actualizados: %+v", weights)
-			}
-		}
-	}()
+	// El ciclo MAPE-K ahora actualiza el balanceador de carga.
+	// La goroutine con el Ticker ha sido eliminada.
 
 	// Handler principal: Balanceo de carga con Weighted Round Robin
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

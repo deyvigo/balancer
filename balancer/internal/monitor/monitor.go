@@ -30,7 +30,7 @@ type MonitorService struct {
 	alpha            float64
 	period           time.Duration
 	mu               sync.RWMutex
-	updatesChannel   chan []internal.Metrics
+	updatesChannel   chan map[string]internal.Metrics
 	logger           *slog.Logger
 	failureThreshold int
 	openStateTimeout time.Duration
@@ -65,14 +65,14 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 		},
 		alpha:            alpha,
 		period:           period,
-		updatesChannel:   make(chan []internal.Metrics, 10),
+		updatesChannel:   make(chan map[string]internal.Metrics, 10),
 		logger:           logger,
 		failureThreshold: failureThreshold,
 		openStateTimeout: openStateTimeout,
 	}
 }
 
-func (m *MonitorService) GetUpdatesChannel() <-chan []internal.Metrics {
+func (m *MonitorService) GetUpdatesChannel() <-chan map[string]internal.Metrics {
 	return m.updatesChannel
 }
 
@@ -209,14 +209,14 @@ func (m *MonitorService) checkAll() {
 	wg.Wait()
 }
 
-func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
+func (m *MonitorService) SnapshotMetrics() map[string]internal.Metrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	res := make([]internal.Metrics, 0, len(m.backends))
+	res := make(map[string]internal.Metrics, len(m.backends))
 	for i, b := range m.backends {
 		alive, ema, er, last, u, state := b.snapshot()
-		res = append(res, internal.Metrics{
+		res[u] = internal.Metrics{
 			Id:           i,
 			URL:          u,
 			Alive:        alive,
@@ -224,7 +224,7 @@ func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
 			ErrorRate:    er,
 			LastChecked:  last.Format(time.RFC3339),
 			CircuitState: state,
-		})
+		}
 	}
 	return res
 }
