@@ -7,19 +7,8 @@ function App() {
 
   useEffect(() => {
     const socket = connectWebSocket((data) => {
-      if (Array.isArray(data)) {
-        setReplics(data)
-      } else {
-        setReplics((prev) => {
-          const idx = prev.findIndex((r) => r.id === data.id)
-          if (idx !== -1) {
-            const updated = [...prev]
-            updated[idx] = data
-            return updated
-          }
-          return [...prev, data]
-        })
-      }
+      const replicsArray = Object.values(data)
+      setReplics(replicsArray as ReplicInfo[])
     })
 
     return () => socket.close()
