@@ -1,18 +1,54 @@
 export const connectWebSocket = (onMessage: (data: any) => void) => {
-  const socket = new WebSocket("ws://localhost:9000/metrics/ws")
+  let socket: WebSocket | null = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 5;
+  const reconnectDelay = 2000;
+  let isIntentionallyClosed = false;
 
-  socket.onopen = () => console.log("✅ WebSocket conectado");
-  socket.onclose = () => console.log("🔌 WebSocket cerrado");
-  socket.onerror = (err) => console.error("❌ Error WS:", err);
-
-  socket.onmessage = (event) => {
+  const connect = () => {
     try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
-    } catch (e) {
-      console.error("❗ Error al parsear mensaje:", e);
+      socket = new WebSocket("ws://localhost:9000/metrics/ws");
+
+      socket.onopen = () => {
+        console.log("✅ WebSocket conectado");
+        reconnectAttempts = 0;
+      };
+
+      socket.onclose = (event) => {
+        console.log("🔌 WebSocket cerrado", event.code);
+        
+        if (!isIntentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          console.log(`🔄 Reintentando conexión (${reconnectAttempts}/${maxReconnectAttempts})...`);
+          setTimeout(connect, reconnectDelay);
+        }
+      };
+
+      socket.onerror = (err) => console.error("❌ Error WS:", err);
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // El backend envía un mapa {url: metrics}, convertir a array
+          const metricsArray = Object.values(data);
+          onMessage(metricsArray);
+        } catch (e) {
+          console.error("❗ Error al parsear mensaje:", e);
+        }
+      };
+    } catch (error) {
+      console.error("❌ Error al crear WebSocket:", error);
     }
   };
 
-  return socket;
+  connect();
+
+  return {
+    close: () => {
+      isIntentionallyClosed = true;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close(1000, "Cierre intencional");
+      }
+    }
+  };
 }
