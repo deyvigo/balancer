@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/signal"
 	"time"
@@ -26,6 +23,8 @@ func main() {
 		panic(err)
 	}
 
+	limiterConf := config.GetRateLimiterConfig()
+
 	// create loggers
 	monitorLogger := config.GetModuleLogger("monitor")
 	analyzeLogger := config.GetModuleLogger("analyze")
@@ -33,30 +32,36 @@ func main() {
 	executeLogger := config.GetModuleLogger("execute")
 
 	backends := []string{
-		"http://localhost:8080",
-		"http://localhost:8081",
-		"http://localhost:8082",
+		"http://127.0.0.1:8080",
+		"http://127.0.0.1:8081",
+		"http://127.0.0.1:8082",
 	}
 
 	alpha := 0.2
-	period := 5 * time.Second
+	period := 1 * time.Second
 	timeout := 2 * time.Second
 
+	// aaaaaaa
 	failureThreshold := 3
 	openStateTimeout := 10 * time.Second
+	// Crear load balancer para redirigir el tráfico hacia las réplicas
+	lb := loadbalancer.NewLoadBalancer(backends)
+	lb.UpdateRateLimit(limiterConf.NormalRate, limiterConf.NormalBurst)
 
-	mon := monitor.NewMonitor(backends, period, alpha, timeout, monitorLogger, failureThreshold, openStateTimeout)
+	mon := monitor.NewMonitor(backends, period, alpha, timeout, monitorLogger, failureThreshold, openStateTimeout, lb)
 	analyzer := analyze.NewAnalyzer(mon.GetUpdatesChannel(), analyzeLogger)
 	plan := plan.NewPlan(analyzer.GetUpdatesChannel(), planLogger)
-	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger)
-
-	// Crear balanceador Weighted Round Robin
-	wrr := loadbalancer.NewWeightedRoundRobin()
+	execute := execute.NewExecute(plan.GetUpdatesChannel(), executeLogger, lb)
 
 	// Crear servidor WebSocket
 	wsServer := &web.WebSocketServer{
 		Monitor: mon,
 	}
+
+	// Crear mutex
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics/ws", wsServer.MetricsHandler)
+	mux.Handle("/", lb)
 
 	// Contexto para manejar shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -68,56 +73,8 @@ func main() {
 	plan.Start(ctx)
 	execute.Start(ctx)
 
-	// Actualizar pesos del load balancer periódicamente
-	go func() {
-		ticker := time.NewTicker(period)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				metrics := mon.SnapshotMetrics()
-				wrr.UpdateMetrics(metrics)
-
-				// Log de pesos calculados
-				weights := wrr.GetBackendWeights()
-				log.Printf("[LoadBalancer] Pesos actualizados: %+v", weights)
-			}
-		}
-	}()
-
-	// Handler principal: Balanceo de carga con Weighted Round Robin
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		backendURL, ok := wrr.NextBackend()
-		if !ok {
-			http.Error(w, "No hay backends disponibles", http.StatusServiceUnavailable)
-			log.Println("[LoadBalancer] ⚠️  No hay backends disponibles")
-			return
-		}
-
-		target, err := url.Parse(backendURL)
-		if err != nil {
-			http.Error(w, "Error al parsear URL del backend", http.StatusInternalServerError)
-			log.Printf("[LoadBalancer] ❌ Error parseando URL %s: %v", backendURL, err)
-			return
-		}
-
-		// Crear reverse proxy
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("[LoadBalancer] ❌ Error en proxy a %s: %v", target, err)
-			http.Error(w, fmt.Sprintf("Error conectando con backend: %v", err), http.StatusBadGateway)
-		}
-
-		log.Printf("[LoadBalancer] ➡️  %s → %s", r.URL.Path, backendURL)
-		proxy.ServeHTTP(w, r)
-	})
-
-	http.HandleFunc("/metrics/ws", wsServer.MetricsHandler)
-
 	addr := ":9000"
-	srv := &http.Server{Addr: addr, Handler: nil}
+	srv := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
 		log.Printf("Server runing in %s", addr)

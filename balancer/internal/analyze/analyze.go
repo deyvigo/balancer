@@ -6,15 +6,22 @@ import (
 	"log/slog"
 
 	"github.com/deyvigo/balanceador/balancer/internal"
+	"github.com/deyvigo/balanceador/balancer/internal/config"
+)
+
+// mover a config.json
+const (
+	HighTrafficThreshold = 100.0 // RPS (Peticiones por segundo)
+	AttackThreshold      = 500.0 // RPS considerado ataque
 )
 
 type Analyzer struct {
-	inputChannel  <-chan []internal.Metrics
+	inputChannel  <-chan internal.SystemStatus
 	outputChannel chan []internal.AnalysisResult
 	logger        *slog.Logger
 }
 
-func NewAnalyzer(inputChannel <-chan []internal.Metrics, logger *slog.Logger) *Analyzer {
+func NewAnalyzer(inputChannel <-chan internal.SystemStatus, logger *slog.Logger) *Analyzer {
 	return &Analyzer{
 		inputChannel:  inputChannel,
 		outputChannel: make(chan []internal.AnalysisResult, 10),
@@ -44,9 +51,9 @@ func (a *Analyzer) Start(ctx context.Context) {
 	}()
 }
 
-func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
-	results := make([]internal.AnalysisResult, 0, len(metrics))
-	for _, m := range metrics {
+func (a *Analyzer) analyzeBatch(systemStatus internal.SystemStatus) {
+	results := make([]internal.AnalysisResult, 0, len(systemStatus.Backends)+1)
+	for _, m := range systemStatus.Backends {
 		var status, reason string
 
 		switch m.CircuitState {
@@ -82,6 +89,32 @@ func (a *Analyzer) analyzeBatch(metrics []internal.Metrics) {
 		})
 
 	}
+
+	lbAnalysis := internal.AnalysisResult{
+		BackendId: -1,
+		Status:    "NORMAL",
+		Reason:    "Traffic normal",
+	}
+
+	lb := systemStatus.LB
+	conf := config.GetAnalyzerConfig()
+
+	if lb.RPS > conf.AttackThreshold {
+		lbAnalysis.Status = "ATTACK"
+		lbAnalysis.Reason = fmt.Sprintf("Critical RPS detected: %.2f", lb.RPS)
+		a.logger.Error("Analyzer detected ATTACK conditions!", "rps", lb.RPS)
+	} else if lb.RPS > conf.HighTrafficThreshold {
+		lbAnalysis.Status = "HIGH_LOAD"
+		lbAnalysis.Reason = fmt.Sprintf("High traffic: %.2f RPS", lb.RPS)
+		a.logger.Info("Analyzer detected High Load", "rps", lb.RPS)
+	} else if lb.BlockedReqs > 0 {
+		// Si el tráfico es bajo pero hay bloqueos, el rate limiter está trabajando (quizás mitigando un ataque lento)
+		lbAnalysis.Status = "MITIGATING"
+		lbAnalysis.Reason = fmt.Sprintf("Blocking requests: %d dropped", lb.BlockedReqs)
+	}
+
+	results = append(results, lbAnalysis)
+
 	if len(results) > 0 {
 		select {
 		case a.outputChannel <- results:

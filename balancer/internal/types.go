@@ -23,6 +23,17 @@ type Metrics struct {
 	CircuitState CircuitState `json:"circuit_state"`
 }
 
+type BalancerStats struct {
+	TotalReqs   uint64  `json:"total_reqs"`
+	BlockedReqs uint64  `json:"blocked_reqs"`
+	RPS         float64 `json:"rps"`
+}
+
+type SystemStatus struct {
+	Backends []Metrics     `json:"backends"`
+	LB       BalancerStats `json:"balancer"`
+}
+
 type Backend struct {
 	URL             *url.URL     `json:"url"`
 	Alive           bool         `json:"alive"`

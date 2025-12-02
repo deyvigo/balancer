@@ -9,6 +9,17 @@ import (
 	"github.com/deyvigo/balanceador/balancer/internal"
 )
 
+const (
+	// Acciones para Réplicas
+	ActionRestart      = "ATTEMPT_RESTART"
+	ActionThrottle     = "THROTTLE_TRAFFIC"
+	ActionEnsureActive = "ENSURE_ACTIVE"
+
+	// Acciones Globales (Rate Limiting)
+	ActionMitigateAttack = "MITIGATE_ATTACK"
+	ActionNormalOp       = "NORMAL_OPERATION"
+)
+
 type Plan struct {
 	inputChannel  <-chan []internal.AnalysisResult
 	outputChannel chan []internal.PlanResult
@@ -50,35 +61,52 @@ func (p *Plan) Start(ctx context.Context) {
 func (p *Plan) planBatch(analysis []internal.AnalysisResult) {
 	batchPlan := make([]internal.PlanResult, 0, len(analysis))
 	for _, item := range analysis {
-
 		lastStatus, known := p.lastStatuses[item.BackendId]
-
 		if known && lastStatus == item.Status {
 			// No changes
 			continue
 		}
+
 		p.lastStatuses[item.BackendId] = item.Status
 
 		var action string
-		switch item.Status {
-		case "DOWN":
-			action = "ATTEMPT_RESTART"
-			p.logger.Info(fmt.Sprintf("DECISIÓN: Prender/Reiniciar Backend %d (Causa: %s)", item.BackendId, item.Reason))
-		case "DEGRADED":
-			action = "THROTTLE_TRAFFIC"
-			p.logger.Info(fmt.Sprintf("DECISIÓN: Limitar tráfico al Backend %d (Causa: %s)", item.BackendId, item.Reason))
-		case "HEALTHY":
-			action = "ENSURE_ACTIVE"
-		default:
-			action = "NO_OP"
-			p.logger.Info(fmt.Sprintf("Estado desconocido para Backend %d", item.BackendId))
-			log.Printf("[PLAN] Estado desconocido para Backend %d", item.BackendId)
+
+		if item.BackendId == -1 {
+			switch item.Status {
+			case "ATTACK", "HIGH_LOAD":
+				action = ActionMitigateAttack
+				p.logger.Warn("PLAN: Detectado ataque/carga crítica. Activando escudo.", "cause", item.Reason)
+			case "NORMAL":
+				action = ActionNormalOp
+				p.logger.Info("PLAN: Tráfico normal. Relajando límites.")
+			case "MITIGATING":
+				action = "NO_OP"
+			default:
+				action = "NO_OP"
+			}
+		} else {
+			switch item.Status {
+			case "DOWN":
+				action = ActionRestart
+				p.logger.Info(fmt.Sprintf("DECISIÓN: Prender/Reiniciar Backend %d (Causa: %s)", item.BackendId, item.Reason))
+			case "DEGRADED":
+				action = ActionThrottle
+				p.logger.Info(fmt.Sprintf("DECISIÓN: Limitar tráfico al Backend %d (Causa: %s)", item.BackendId, item.Reason))
+			case "HEALTHY":
+				action = ActionEnsureActive
+			default:
+				action = "NO_OP"
+				p.logger.Info(fmt.Sprintf("Estado desconocido para Backend %d", item.BackendId))
+				log.Printf("[PLAN] Estado desconocido para Backend %d", item.BackendId)
+			}
 		}
 
-		batchPlan = append(batchPlan, internal.PlanResult{
-			BackendId: item.BackendId,
-			Action:    action,
-		})
+		if action != "NO_OP" {
+			batchPlan = append(batchPlan, internal.PlanResult{
+				BackendId: item.BackendId,
+				Action:    action,
+			})
+		}
 	}
 
 	if len(batchPlan) > 0 {

@@ -3,7 +3,17 @@
   "logging": {
     "monitor": false,
     "analyze": false,
-    "plan": true,
+    "plan": false,
     "execute": true
+  },
+  "rate_limiter": {
+    "normal_rate": 50,
+    "normal_burst": 10,
+    "attack_rate": 5,
+    "attack_burst": 1
+  },
+  "analyzer": {
+    "high_traffic_threshold": 100.0,
+    "attack_threshold": 300.0
   }
 }

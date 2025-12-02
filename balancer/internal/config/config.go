@@ -48,11 +48,26 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 	return h // Simplificación para este ejemplo
 }
 
-type Config struct {
-	Logging map[string]bool
+type RateLimiterConfig struct {
+	NormalRate  float64 `json:"normal_rate"`
+	NormalBurst float64 `json:"normal_burst"`
+	AttackRate  float64 `json:"attack_rate"`
+	AttackBurst float64 `json:"attack_burst"`
 }
 
-var globaclConig Config
+type AnalyzerConfig struct {
+	HighTrafficThreshold float64 `json:"high_traffic_threshold"`
+	AttackThreshold      float64 `json:"attack_threshold"`
+}
+
+type Config struct {
+	AppName     string            `json:"app_name"`
+	Logging     map[string]bool   `json:"logging"`
+	RateLimiter RateLimiterConfig `json:"rate_limiter"`
+	Analyzer    AnalyzerConfig    `json:"analyzer"`
+}
+
+var globalConfig Config
 
 func LoadConfig(filename string) error {
 	file, err := os.Open(filename)
@@ -60,15 +75,23 @@ func LoadConfig(filename string) error {
 		return err
 	}
 	defer file.Close()
-	return json.NewDecoder(file).Decode(&globaclConig)
+	return json.NewDecoder(file).Decode(&globalConfig)
 }
 
 func GetModuleLogger(moduleName string) *slog.Logger {
-	isEnabled, exists := globaclConig.Logging[moduleName]
+	isEnabled, exists := globalConfig.Logging[moduleName]
 
 	if !exists || !isEnabled {
 		return slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	handler := NewPrettyHandler(os.Stdout, moduleName)
 	return slog.New(handler)
+}
+
+func GetRateLimiterConfig() RateLimiterConfig {
+	return globalConfig.RateLimiter
+}
+
+func GetAnalyzerConfig() AnalyzerConfig {
+	return globalConfig.Analyzer
 }

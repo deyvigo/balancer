@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/deyvigo/balanceador/balancer/internal"
+	"github.com/deyvigo/balanceador/balancer/internal/loadbalancer"
 )
 
 type SafeBackend struct {
@@ -30,13 +31,23 @@ type MonitorService struct {
 	alpha            float64
 	period           time.Duration
 	mu               sync.RWMutex
-	updatesChannel   chan []internal.Metrics
+	updatesChannel   chan internal.SystemStatus
 	logger           *slog.Logger
 	failureThreshold int
 	openStateTimeout time.Duration
+	loadbalancer     *loadbalancer.LoadBalancer
 }
 
-func NewMonitor(backends []string, period time.Duration, alpha float64, timeout time.Duration, logger *slog.Logger, failureThreshold int, openStateTimeout time.Duration) *MonitorService {
+func NewMonitor(
+	backends []string,
+	period time.Duration,
+	alpha float64,
+	timeout time.Duration,
+	logger *slog.Logger,
+	failureThreshold int,
+	openStateTimeout time.Duration,
+	lb *loadbalancer.LoadBalancer,
+) *MonitorService {
 	bs := make([]*SafeBackend, 0, len(backends))
 
 	for _, s := range backends {
@@ -59,29 +70,30 @@ func NewMonitor(backends []string, period time.Duration, alpha float64, timeout 
 	}
 
 	return &MonitorService{
-		backends:         bs,
+		backends: bs,
 		client: &http.Client{
 			Timeout: timeout,
 		},
 		alpha:            alpha,
 		period:           period,
-		updatesChannel:   make(chan []internal.Metrics, 10),
+		updatesChannel:   make(chan internal.SystemStatus, 10),
 		logger:           logger,
 		failureThreshold: failureThreshold,
 		openStateTimeout: openStateTimeout,
+		loadbalancer:     lb,
 	}
 }
 
-func (m *MonitorService) GetUpdatesChannel() <-chan []internal.Metrics {
+func (m *MonitorService) GetUpdatesChannel() <-chan internal.SystemStatus {
 	return m.updatesChannel
 }
 
 func (m *MonitorService) checkAndNotify() {
 	m.checkAll()
 
-	metrics := m.SnapshotMetrics()
+	fullStatus := m.SnapshotMetrics()
 	select {
-	case m.updatesChannel <- metrics:
+	case m.updatesChannel <- fullStatus:
 	default:
 		m.logger.Warn("Warning: Updates channel full, dropping metric snapshot")
 	}
@@ -209,14 +221,14 @@ func (m *MonitorService) checkAll() {
 	wg.Wait()
 }
 
-func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
+func (m *MonitorService) SnapshotMetrics() internal.SystemStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	res := make([]internal.Metrics, 0, len(m.backends))
+	backendMetrics := make([]internal.Metrics, 0, len(m.backends))
 	for i, b := range m.backends {
 		alive, ema, er, last, u, state := b.snapshot()
-		res = append(res, internal.Metrics{
+		backendMetrics = append(backendMetrics, internal.Metrics{
 			Id:           i,
 			URL:          u,
 			Alive:        alive,
@@ -226,5 +238,18 @@ func (m *MonitorService) SnapshotMetrics() []internal.Metrics {
 			CircuitState: state,
 		})
 	}
-	return res
+
+	incoming, dropped := m.loadbalancer.CollectStats()
+	rps := float64(incoming) / m.period.Seconds()
+
+	lbStats := internal.BalancerStats{
+		TotalReqs:   incoming,
+		BlockedReqs: dropped,
+		RPS:         rps,
+	}
+
+	return internal.SystemStatus{
+		Backends: backendMetrics,
+		LB:       lbStats,
+	}
 }
