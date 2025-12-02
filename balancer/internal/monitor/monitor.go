@@ -69,10 +69,19 @@ func NewMonitor(
 		})
 	}
 
+	// Compartir el mismo transport para el health check
+	transport := &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 3,
+		IdleConnTimeout:     10 * time.Second,
+		DisableKeepAlives:   false,
+	}
+
 	return &MonitorService{
 		backends: bs,
 		client: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 		},
 		alpha:            alpha,
 		period:           period,
@@ -92,6 +101,9 @@ func (m *MonitorService) checkAndNotify() {
 	m.checkAll()
 
 	fullStatus := m.SnapshotMetrics()
+
+	// Actualizar metricas del weighted round robin
+	m.loadbalancer.UpdateMetrics(&fullStatus.Backends)
 	select {
 	case m.updatesChannel <- fullStatus:
 	default:
@@ -132,12 +144,17 @@ func (m *MonitorService) performHealthCheck(b *SafeBackend) (isErr bool) {
 
 	if err != nil {
 		isErr = true
-		m.logger.Error(fmt.Sprintf("%s error: %v", b.data.URL.String(), err))
+		m.logger.Error(fmt.Sprintf("%s health check failed: %v (latency: %.1fms)", b.data.URL.String(), err, latMs))
 	} else {
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			isErr = true
-			m.logger.Error(fmt.Sprintf("%s returned status %d", b.data.URL.String(), resp.StatusCode))
+			m.logger.Error(fmt.Sprintf("%s returned status %d (latency: %.1fms)", b.data.URL.String(), resp.StatusCode, latMs))
+		} else {
+			// Solo loguear si la latencia es alta
+			if latMs > 1000 {
+				m.logger.Info(fmt.Sprintf("%s health check OK but slow: %.1fms", b.data.URL.String(), latMs))
+			}
 		}
 	}
 

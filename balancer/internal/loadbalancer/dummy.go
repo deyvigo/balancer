@@ -1,7 +1,6 @@
 package loadbalancer
 
 import (
-	"fmt"
 	"math"
 	"net"
 	"net/http"
@@ -13,24 +12,28 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/deyvigo/balanceador/balancer/internal"
 	"github.com/deyvigo/balanceador/balancer/internal/config"
 )
 
 type LoadBalancer struct {
 	backends     []*httputil.ReverseProxy
+	targets      []string
 	current      uint64
 	incomingReqs uint64
 	droppedReqs  uint64
 	limiter      *TokenBucket
+	wrr          *WeightedRoundRobin
 }
 
 func NewLoadBalancer(targets []string) *LoadBalancer {
 	var proxies []*httputil.ReverseProxy
 
 	transport := &http.Transport{
-		MaxIdleConns:        1000, // Mantener hasta 1000 conexiones vivas en total
-		MaxIdleConnsPerHost: 100,  // Mantener 100 vivas por cada Docker
-		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConns:        100, // Reducir para no consumir tantos recursos
+		MaxIdleConnsPerHost: 10,  // Menos conexiones por host
+		IdleConnTimeout:     30 * time.Second,
+		DisableKeepAlives:   false, // Mantener keep-alives para reutilizar
 	}
 
 	for _, target := range targets {
@@ -52,25 +55,37 @@ func NewLoadBalancer(targets []string) *LoadBalancer {
 
 	return &LoadBalancer{
 		backends: proxies,
+		targets:  targets,
 		limiter:  NewTokenBucket(limiterConfig.NormalRate, limiterConfig.NormalBurst),
+		wrr:      NewWeightedRoundRobin(),
 	}
 }
 
-// aquí sería round robin
+// usar WeightedRoundRobin para seleccionar el siguiente backend
 func (lb *LoadBalancer) NextProxy() *httputil.ReverseProxy {
+	if backendURL, ok := lb.wrr.NextBackend(); ok {
+		for i, target := range lb.targets {
+			if target == backendURL {
+				return lb.backends[i]
+			}
+		}
+	}
+
+	// Fallback a round robin simple si WRR no tiene backends disponibles
 	next := atomic.AddUint64(&lb.current, 1)
 	index := next % uint64(len(lb.backends))
 	return lb.backends[index]
 }
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	clientIp := GetClientIP(r)
+	// clientIp := GetClientIP(r)
 	atomic.AddUint64(&lb.incomingReqs, 1)
 
 	if !lb.limiter.Allow() {
 		atomic.AddUint64(&lb.droppedReqs, 1)
-		fmt.Printf("⛔ Bloqueando IP: %s (Rate Limit Excedido)\n", clientIp)
+		// fmt.Printf("⛔ Bloqueando IP: %s (Rate Limit Excedido) - Enviando 429\n", clientIp)
 		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusTooManyRequests) // 429
 		w.Write([]byte("Rate limit exceeded"))
 		return
@@ -90,6 +105,11 @@ func (lb *LoadBalancer) CollectStats() (incoming, dropped uint64) {
 // metodo para execute
 func (lb *LoadBalancer) UpdateRateLimit(rate, burst float64) {
 	lb.limiter.SetParams(rate, burst)
+}
+
+// metodo para el monitor (actualizar metricas del weighted round robin)
+func (lb *LoadBalancer) UpdateMetrics(metrics *[]internal.Metrics) {
+	lb.wrr.UpdateMetrics(*metrics)
 }
 
 // implementacion tocken bucket (podria no ir aquí para modular mejor)
@@ -120,6 +140,7 @@ func (tb *TokenBucket) Allow() bool {
 
 	if tokensToAdd > 0 {
 		tb.tokens = math.Min(tb.capacity, tb.tokens+tokensToAdd)
+		tb.lastRefill = now
 	}
 
 	if tb.tokens >= 1 {

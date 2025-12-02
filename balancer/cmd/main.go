@@ -39,11 +39,11 @@ func main() {
 
 	alpha := 0.2
 	period := 1 * time.Second
-	timeout := 2 * time.Second
+	timeout := 5 * time.Second
 
 	// aaaaaaa
-	failureThreshold := 3
-	openStateTimeout := 10 * time.Second
+	failureThreshold := 5
+	openStateTimeout := 15 * time.Second
 	// Crear load balancer para redirigir el tráfico hacia las réplicas
 	lb := loadbalancer.NewLoadBalancer(backends)
 	lb.UpdateRateLimit(limiterConf.NormalRate, limiterConf.NormalBurst)

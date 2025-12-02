@@ -1,19 +1,19 @@
 {
   "app_name": "balancer",
   "logging": {
-    "monitor": false,
-    "analyze": false,
-    "plan": false,
+    "monitor": true,
+    "analyze": true,
+    "plan": true,
     "execute": true
   },
   "rate_limiter": {
-    "normal_rate": 50,
-    "normal_burst": 10,
-    "attack_rate": 5,
-    "attack_burst": 1
+    "normal_rate": 500,
+    "normal_burst": 100,
+    "attack_rate": 50,
+    "attack_burst": 20
   },
   "analyzer": {
-    "high_traffic_threshold": 100.0,
-    "attack_threshold": 300.0
+    "high_traffic_threshold": 30.0,
+    "attack_threshold": 80.0
   }
 }

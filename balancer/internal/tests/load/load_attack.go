@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	TargetURL = "http://localhost:9000" // Tu Balanceador
+	TargetURL = "http://localhost:9000/api/hello" // Tu Balanceador
 )
 
 // Contadores atómicos para ver las estadísticas en tiempo real
@@ -80,7 +80,7 @@ func main() {
 
 func worker(id int, sleepTime time.Duration, done chan bool, wg *sync.WaitGroup) {
 	defer wg.Done()
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	for {
 		select {
@@ -103,16 +103,21 @@ func worker(id int, sleepTime time.Duration, done chan bool, wg *sync.WaitGroup)
 			atomic.AddUint64(&reqsSent, 1)
 
 			if err != nil {
-				if atomic.LoadUint64(&reqsFailed) == 0 {
-					fmt.Printf("\n[DEBUG] Error de red real: %v\n", err)
-				}
-				atomic.AddUint64(&reqsFailed, 1)
-			} else {
-				if resp.StatusCode == 200 {
-					atomic.AddUint64(&reqsSuccess, 1)
-				} else if resp.StatusCode == 429 {
-					atomic.AddUint64(&reqsBlocked, 1)
+				if err.Error() == "context deadline exceeded" || err.Error() == "net/http: request canceled" {
+					atomic.AddUint64(&reqsFailed, 1)
 				} else {
+					if atomic.LoadUint64(&reqsFailed) == 0 {
+						// fmt.Printf("\n[DEBUG] Error de red real: %v\n", err)
+					}
+					atomic.AddUint64(&reqsFailed, 1)
+				}
+			} else {
+				switch resp.StatusCode {
+				case 200:
+					atomic.AddUint64(&reqsSuccess, 1)
+				case 429:
+					atomic.AddUint64(&reqsBlocked, 1)
+				default:
 					// Otros errores (500, etc)
 					atomic.AddUint64(&reqsFailed, 1)
 				}
@@ -133,8 +138,8 @@ func reporter(done chan bool) {
 
 	var prevSent uint64 = 0
 
-	fmt.Println("\nTIEMPO | RPS Real | 200 OK | 429 BLOCK | ERRORES")
-	fmt.Println("-------+----------+--------+-----------+--------")
+	fmt.Println("\nTIEMPO   | RPS Real | 200 OK | 429 BLOCK | ERRORES")
+	fmt.Println("---------+----------+--------+-----------+--------")
 
 	for {
 		select {

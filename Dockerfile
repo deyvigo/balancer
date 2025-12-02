@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod ./
 RUN go mod download
 COPY . .
-RUN go build -o service ./service
+RUN cd service && go build -ldflags "-s -w" -o ../service .
 
 # Etapa 2
 FROM alpine:latest
@@ -12,4 +12,4 @@ WORKDIR /app
 COPY --from=builder /app/service .
 EXPOSE 8080
 
-CMD ["./service"]
+CMD ["./service", "8080"]

@@ -11,8 +11,8 @@ import (
 
 // mover a config.json
 const (
-	HighTrafficThreshold = 100.0 // RPS (Peticiones por segundo)
-	AttackThreshold      = 500.0 // RPS considerado ataque
+	HighTrafficThreshold = 30.0 // RPS (Peticiones por segundo)
+	AttackThreshold      = 80.0 // RPS considerado ataque
 )
 
 type Analyzer struct {
@@ -69,15 +69,15 @@ func (a *Analyzer) analyzeBatch(systemStatus internal.SystemStatus) {
 			if !m.Alive {
 				status = "DOWN"
 				reason = "Connection refused / timeout"
-				a.logger.Info(fmt.Sprintf("Backend %d is down", m.Id))
+				a.logger.Info(fmt.Sprintf("Backend %d is down (ErrorRate: %.2f, EMAMs: %.1f)", m.Id, m.ErrorRate, m.EMAMs))
 			} else if m.ErrorRate > 0.5 {
 				status = "DEGRADED"
 				reason = "Error rate is high (>50%)"
-				a.logger.Info(fmt.Sprintf("Backend %d is degraded", m.Id))
+				a.logger.Info(fmt.Sprintf("Backend %d is degraded (ErrorRate: %.2f, EMAMs: %.1f)", m.Id, m.ErrorRate, m.EMAMs))
 			} else {
 				status = "HEALTHY"
 				reason = "Everything is ok"
-				a.logger.Info(fmt.Sprintf("Backend %d is healthy", m.Id))
+				// a.logger.Info(fmt.Sprintf("Backend %d is healthy", m.Id))
 			}
 		}
 
