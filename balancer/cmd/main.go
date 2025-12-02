@@ -56,6 +56,7 @@ func main() {
 	// Crear servidor WebSocket
 	wsServer := &web.WebSocketServer{
 		Monitor: mon,
+		LB:      lb,
 	}
 
 	// Crear mutex

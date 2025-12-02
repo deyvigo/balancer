@@ -107,6 +107,11 @@ func (lb *LoadBalancer) UpdateRateLimit(rate, burst float64) {
 	lb.limiter.SetParams(rate, burst)
 }
 
+// GetRateLimitParams devuelve los parámetros actuales del rate limiter
+func (lb *LoadBalancer) GetRateLimitParams() (rate, burst float64) {
+	return lb.limiter.GetParams()
+}
+
 // metodo para el monitor (actualizar metricas del weighted round robin)
 func (lb *LoadBalancer) UpdateMetrics(metrics *[]internal.Metrics) {
 	lb.wrr.UpdateMetrics(*metrics)
@@ -162,6 +167,13 @@ func (tb *TokenBucket) SetParams(newRate, newCapacity float64) {
 	if tb.tokens > newCapacity {
 		tb.tokens = newCapacity
 	}
+}
+
+// GetParams devuelve los parámetros actuales
+func (tb *TokenBucket) GetParams() (rate, burst float64) {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return tb.rate, tb.capacity
 }
 
 // Helper para obtener la IP real (o la falsa si estamos en modo test)

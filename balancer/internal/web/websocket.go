@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/deyvigo/balanceador/balancer/internal/loadbalancer"
 	"github.com/deyvigo/balanceador/balancer/internal/monitor"
 	"github.com/gorilla/websocket"
 )
 
 type WebSocketServer struct {
 	Monitor *monitor.MonitorService
+	LB      *loadbalancer.LoadBalancer
 }
 
 func (ws *WebSocketServer) MetricsHandler(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +55,21 @@ func (ws *WebSocketServer) MetricsHandler(w http.ResponseWriter, r *http.Request
 			}
 		case <-ticker.C:
 			metrics := ws.Monitor.SnapshotMetrics()
-			data, err := json.Marshal(metrics)
+
+			// Obtener parámetros actuales del rate limiter
+			rate, burst := ws.LB.GetRateLimitParams()
+
+			// Crear mensaje extendido con métricas y parámetros
+			message := map[string]interface{}{
+				"backends": metrics.Backends,
+				"lb":       metrics.LB,
+				"rateLimit": map[string]float64{
+					"rate":  rate,
+					"burst": burst,
+				},
+			}
+
+			data, err := json.Marshal(message)
 			if err != nil {
 				log.Printf("[websocket] error al serializar métricas: %v", err)
 				continue

@@ -6,6 +6,7 @@ import { useMetricsHistory } from "./hooks/useMetricsHistory"
 
 function App() {
   const [replics, setReplics] = useState<ReplicInfo[]>([])
+  const [rateLimit, setRateLimit] = useState({ rate: 50, burst: 10 })
   
   // Hook para manejar métricas históricas
   const { addMetricPoint, getMetricsForBackend } = useMetricsHistory()
@@ -13,8 +14,14 @@ function App() {
   useEffect(() => {
     // Conexión WebSocket para métricas en tiempo real
     const wsConnection = connectWebSocket((data) => {
-      // data ya viene como array desde WebSocketService
-      if (Array.isArray(data)) {
+      // data viene como {backends: [...], lb: {...}, rateLimit: {...}}
+      if (data.backends && Array.isArray(data.backends)) {
+        setReplics(data.backends)
+        if (data.rateLimit) {
+          setRateLimit(data.rateLimit)
+        }
+      } else if (Array.isArray(data)) {
+        // Compatibilidad con formato antiguo
         setReplics(data)
       }
     })
@@ -67,6 +74,38 @@ function App() {
             <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded">🟡 {circuitsHalfOpen}</span>
             <span className="px-2 py-1 bg-red-100 text-red-800 rounded">🔴 {circuitsOpen}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Rate Limit Status */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">🚦 Rate Limit</h3>
+          <div className="text-3xl font-bold text-purple-600">{rateLimit.rate}</div>
+          <p className="text-sm text-gray-500">peticiones/segundo</p>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">💥 Burst</h3>
+          <div className="text-3xl font-bold text-orange-600">{rateLimit.burst}</div>
+          <p className="text-sm text-gray-500">ráfaga máxima</p>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">🛡️ Estado</h3>
+          <div className="text-3xl font-bold text-green-600">
+            {rateLimit.rate <= 30 ? '🟢 Normal' : 
+             rateLimit.rate <= 80 ? '🟡 Alta Carga' : '🔴 Ataque'}
+          </div>
+          <p className="text-sm text-gray-500">modo actual</p>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">📈 Cambios</h3>
+          <div className="text-3xl font-bold text-blue-600">
+            {rateLimit.rate === 50 ? '✅' : '🔄'}
+          </div>
+          <p className="text-sm text-gray-500">última actualización</p>
         </div>
       </div>
 

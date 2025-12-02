@@ -30,17 +30,21 @@ export const connectWebSocket = (onMessage: (data: any) => void) => {
         try {
           const data = JSON.parse(event.data);
           
-          // El backend ahora envía SystemStatus: {backends: [...], lb: {...}}
-          // Extraer solo el array de backends para compatibilidad
+          // El backend ahora envía: {backends: [...], lb: {...}, rateLimit: {rate, burst}}
           if (data.backends && Array.isArray(data.backends)) {
-            onMessage(data.backends);
+            // Enviar métricas y parámetros de rate limit
+            onMessage({
+              backends: data.backends,
+              lb: data.lb,
+              rateLimit: data.rateLimit,
+            });
           } else if (Array.isArray(data)) {
             // Compatibilidad con formato antiguo
-            onMessage(data);
+            onMessage({ backends: data });
           } else {
             // Formato de mapa antiguo: {url: metrics}
             const metricsArray = Object.values(data);
-            onMessage(metricsArray);
+            onMessage({ backends: metricsArray });
           }
         } catch (e) {
           console.error("❗ Error al parsear mensaje:", e);
